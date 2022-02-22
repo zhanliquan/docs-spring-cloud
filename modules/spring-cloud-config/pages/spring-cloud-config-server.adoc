@@ -1,0 +1,600 @@
+Spring Cloud Config Server provides an HTTP resource-based API for external configuration (name-value pairs or equivalent YAML content).
+The server is embeddable in a Spring Boot application, by using the `@EnableConfigServer` annotation.
+Consequently, the following application is a config server:
+
+Spring Cloud Config Server 为外部配置(name-value对或者是等价的YAML内容)提供了一个基于HTTP访问资源的API。
+通过使用 `@EnableConfigServer` 注解，服务可以嵌入到Spring Boot的应用中。
+一个config server 应用如下:
+
+.ConfigServer.java
+[source,java]
+----
+@SpringBootApplication
+@EnableConfigServer
+public class ConfigServer {
+  public static void main(String[] args) {
+    SpringApplication.run(ConfigServer.class, args);
+  }
+}
+----
+
+Like all Spring Boot applications, it runs on port 8080 by default, but you can switch it to the more conventional port 8888 in various ways.
+The easiest, which also sets a default configuration repository, is by launching it with `spring.config.name=configserver` (there is a `configserver.yml` in the Config Server jar).
+Another is to use your own `application.properties`, as shown in the following example:
+
+和所有的Spring Boot应用一样，它运行在默认的8080端口，但是你可以很多方式切换到更传统的8888端口。
+最简单就是使用一个默认的配置文件，通过启动的时候指定 `spring.config.name=configserver` （configserver就是指向Config Server中的 `configserver.yml`)。
+另一个方式在自己的 `application.properties` 中指定，例如显示如下：
+
+.application.properties
+[source,properties]
+----
+server.port=8888
+spring.cloud.config.server.git.uri=file://${user.home}/config-repo
+----
+
+where `${user.home}/config-repo` is a git repository containing YAML and properties files.
+
+`${user.home}/config-repo` 指向一个包含YAML和properties文件的git仓库。
+
+NOTE: On Windows, you need an extra "/" in the file URL if it is absolute with a drive prefix (for example,`file:///${user.home}/config-repo`).
+
+NOTE: 在Windows上，如果是绝对路劲，文件URL需要额外的加上一个前缀"/"（例如：`file:///${user.home}/config-repo`).
+
+[TIP]
+====
+The following listing shows a recipe for creating the git repository in the preceding example:
+
+可以通过如下的方式，为前面的例子创建git仓库：
+
+[source,shell]
+----
+$ cd $HOME
+$ mkdir config-repo
+$ cd config-repo
+$ git init .
+$ echo info.foo: bar > application.properties
+$ git add -A .
+$ git commit -m "Add application.properties"
+----
+====
+
+WARNING: Using the local filesystem for your git repository is intended for testing only.
+You should use a server to host your configuration repositories in production.
+
+WARNING: 这是一个只为了测试创建的本地文件系统的git仓库。
+最好在生产环境中使用服务器托管配置仓库。
+
+WARNING: The initial clone of your configuration repository can be quick and efficient if you keep only text files in it.
+If you store binary files, especially large ones, you may experience delays on the first request for configuration or encounter out of memory errors in the server.
+
+WARNING: 如果在仓库中只保存文本文件，这样方便快速有效的初始化clone配置仓库。
+如果存储了二进制文件，或特别大的文件，你可能请求配置文件的时候回延迟，在服务器遇到内存溢出（OOM）.
+
+=== Environment Repository
+
+Where should you store the configuration data for the Config Server?
+The strategy that governs this behaviour is the `EnvironmentRepository`, serving `Environment` objects.
+This `Environment` is a shallow copy of the domain from the Spring `Environment` (including `propertySources` as the main feature).
+The `Environment` resources are parametrized by three variables:
+
+在哪里存储Config Server的配置信息呢？
+管理这种行为的策略是 `EnvironmentRepository`， 它提供 `Environment` 对象.
+这个 `Environment` 是从Spring `Environment` (包括作为主要特征的 `propertySources`) 域的浅层拷贝。
+The `Environment` 资源是由3变量作为参数:
+
+
+* `{application}`, which maps to `spring.application.name` on the client side.
+* `{profile}`, which maps to `spring.profiles.active` on the client (comma-separated list).
+* `{label}`, which is a server side feature labelling a "versioned" set of config files.
+
+Repository implementations generally behave like a Spring Boot application, loading configuration files from a `spring.config.name` equal to the `{application}` parameter, and `spring.profiles.active` equal to the `{profiles}` parameter.
+Precedence rules for profiles are also the same as in a regular Spring Boot application: Active profiles take precedence over defaults, and, if there are multiple profiles, the last one wins (similar to adding entries to a `Map`).
+
+仓库的实现通常表现像Spring Boot应用一样，从 `spring.config.name`（等于变量 `{application}`）和 `spring.profiles.active`（等于变量 `{profiles}` ）加载配置文件。
+配置文件的优先规则也与常规 Spring Boot 应用程序相同：配置文件优先于默认配置，如果有多个配置文件，则最后一个优先（类似于将条目添加到 Map）。
+
+The following sample client application has this bootstrap configuration:
+
+[source,yaml]
+----
+spring:
+  application:
+    name: foo
+  profiles:
+    active: dev,mysql
+----
+
+(As usual with a Spring Boot application, these properties could also be set by environment variables or command line arguments).
+
+If the repository is file-based, the server creates an
+`Environment` from `application.yml` (shared between all clients) and
+`foo.yml` (with `foo.yml` taking precedence).
+If the YAML files have documents inside them that point to Spring profiles, those are applied with higher precedence (in order of the profiles listed).
+If there are profile-specific YAML (or properties) files, these are also applied with higher precedence than the defaults.
+Higher precedence translates to a `PropertySource` listed earlier in the `Environment`.
+(These same rules apply in a standalone Spring Boot application.)
+
+You can set spring.cloud.config.server.accept-empty to false so that Server would return a HTTP 404 status, if the application is not found.By default, this flag is set to true.
+
+==== Git Backend
+
+The default implementation of `EnvironmentRepository` uses a Git backend, which is very convenient for managing upgrades and physical environments and for auditing changes.
+To change the location of the repository, you can set the `spring.cloud.config.server.git.uri` configuration property in the Config Server (for example in `application.yml`).
+If you set it with a `file:` prefix, it should work from a local repository so that you can get started quickly and easily without a server. However, in that case, the server operates directly on the local repository without cloning it (it does not matter if it is not bare because the Config Server never makes changes to the "remote" repository).
+To scale the Config Server up and make it highly available, you need to have all instances of the server pointing to the same repository, so only a shared file system would work.
+Even in that case, it is better to use the `ssh:` protocol for a shared filesystem repository, so that the server can clone it and use a local working copy as a cache.
+
+`EnvironmentRepository` 的默认后端实现是Git, Git非常适合作为审查 管理升级和实际的环境变量。
+需要改成本地的仓库地址，可以在Config Server的配置文件（例如 `application.yml`）设置 `spring.cloud.config.server.git.uri` 。 可以通过设置前缀 `file:` 的本地仓库，这样可以快速开始并且不用启动 Git Server。 在这种情况下，服务器直接对本地存储库进行操作，而不需要克隆它(如果它不是bare也没关系，因为配置服务器不会对"remote"存储库进行更改)
+要扩展Config Server并使其高可用，您需要让服务器的所有实例都指定同一个存储库，因此只有共享文件系统才能满足。
+即使在这种情况下，对于共享文件系统存储库最好使用' ssh: '协议，这样服务器可以克隆它，并使用本地工作副本作为缓存。
+
+This repository implementation maps the `{label}` parameter of the HTTP resource to a git label (commit id, branch name, or tag).
+If the git branch or tag name contains a slash (`/`), then the label in the HTTP URL should instead be specified with the special string `({special-string})` (to avoid ambiguity with other URL paths).
+For example, if the label is `foo/bar`, replacing the slash would result in the following label: `foo({special-string})bar`.
+The inclusion of the special string `({special-string})` can also be applied to the `{application}` parameter.
+If you use a command-line client such as curl, be careful with the brackets in the URL -- you should escape them from the shell with single quotes ('').
+
+这个仓库实现  HTTP resource 参数中的 `{label}` 与git label（commit id, branch name, or tag）对应。
+如果git branch 或 tag 名称包含斜杠 (`/`)，那么HTTP RUL中的label应该用特殊字符串 `({special-string})` 指定（以避免与其他URL路径产生歧义）。
+例如： 如果label是 `foo/bar`，替换斜杠的结果lable如下: `foo({special-string})bar`。
+特殊字符串 `({special-string})` 的包含也可以应用于 `{application}` 参数中。
+如果使用curl之类的命令行客户端，请小心URL中的括号 —— 应该用单引号（''）将它们从shell中转义出来。
+
+===== Skipping SSL Certificate Validation
+
+The configuration server's validation of the Git server's SSL certificate can be disabled by setting the `git.skipSslValidation` property to `true` (default is `false`).
+
+[source,yaml]
+----
+spring:
+  cloud:
+    config:
+      server:
+        git:
+          uri: https://example.com/my/repo
+          skipSslValidation: true
+----
+
+===== Setting HTTP Connection Timeout
+
+You can configure the time, in seconds, that the configuration server will wait to acquire an HTTP connection. Use the `git.timeout` property.
+
+[source,yaml]
+----
+spring:
+  cloud:
+    config:
+      server:
+        git:
+          uri: https://example.com/my/repo
+          timeout: 4
+----
+
+===== Placeholders in Git URI
+
+Spring Cloud Config Server supports a git repository URL with placeholders for the `{application}` and `{profile}` (and `{label}` if you need it, but remember that the label is applied as a git label anyway).
+So you can support a "`one repository per application`" policy by using a structure similar to the following:
+
+[source,yaml]
+----
+spring:
+  cloud:
+    config:
+      server:
+        git:
+          uri: https://github.com/myorg/{application}
+----
+
+You can also support a "`one repository per profile`" policy by using a similar pattern but with
+`{profile}`.
+
+Additionally, using the special string "({special-string})" within your `{application}` parameters can enable support for multiple
+organizations, as shown in the following example:
+
+[source,yaml]
+----
+spring:
+  cloud:
+    config:
+      server:
+        git:
+          uri: https://github.com/{application}
+----
+
+where `{application}` is provided at request time in the following format: `organization({special-string})application`.
+
+===== Pattern Matching and Multiple Repositories
+
+Spring Cloud Config also includes support for more complex requirements with pattern
+matching on the application and profile name.
+The pattern format is a comma-separated list of `{application}/{profile}` names with wildcards (note that a pattern beginning with a wildcard may need to be quoted), as shown in the following example:
+
+[source,yaml]
+----
+spring:
+  cloud:
+    config:
+      server:
+        git:
+          uri: https://github.com/spring-cloud-samples/config-repo
+          repos:
+            simple: https://github.com/simple/config-repo
+            special:
+              pattern: special*/dev*,*special*/dev*
+              uri: https://github.com/special/config-repo
+            local:
+              pattern: local*
+              uri: file:/home/configsvc/config-repo
+----
+
+If `{application}/{profile}` does not match any of the patterns, it uses the default URI defined under `spring.cloud.config.server.git.uri`.
+In the above example, for the "`simple`" repository, the pattern is `simple/\*` (it only matches one application named `simple` in all profiles). The "`local`" repository matches all application names beginning with `local` in all profiles (the `/*` suffix is added automatically to any pattern that does not have a profile matcher).
+
+NOTE: The "`one-liner`" short cut used in the "`simple`" example can be used only if the only property to be set is the URI.
+If you need to set anything else (credentials, pattern, and so on) you need to use the full form.
+
+The `pattern` property in the repo is actually an array, so you can use a YAML array (or `[0]`, `[1]`, etc. suffixes in properties files) to bind to multiple patterns.
+You may need to do so if you are going to run apps with multiple profiles, as shown in the following example:
+
+[source,yaml]
+----
+spring:
+  cloud:
+    config:
+      server:
+        git:
+          uri: https://github.com/spring-cloud-samples/config-repo
+          repos:
+            development:
+              pattern:
+                - '*/development'
+                - '*/staging'
+              uri: https://github.com/development/config-repo
+            staging:
+              pattern:
+                - '*/qa'
+                - '*/production'
+              uri: https://github.com/staging/config-repo
+----
+
+NOTE: Spring Cloud guesses that a pattern containing a profile that does not end in `\*` implies that you actually want to match a list of profiles starting with this pattern (so `*/staging` is a shortcut for `["\*/staging", "*/staging,*"]`, and so on).
+This is common where, for instance, you need to run applications in the "`development`" profile locally but also the "`cloud`" profile remotely.
+
+Every repository can also optionally store config files in sub-directories, and patterns to search for those directories can be specified as `search-paths`.
+The following example shows a config file at the top level:
+
+[source,yaml]
+----
+spring:
+  cloud:
+    config:
+      server:
+        git:
+          uri: https://github.com/spring-cloud-samples/config-repo
+          search-paths:
+            - foo
+            - bar*
+----
+
+In the preceding example, the server searches for config files in the top level and in the `foo/` sub-directory and also any sub-directory whose name begins with `bar`.
+
+By default, the server clones remote repositories when configuration
+is first requested.
+The server can be configured to clone the repositories at startup, as shown in the following top-level example:
+
+[source,yaml]
+----
+spring:
+  cloud:
+    config:
+      server:
+        git:
+          uri: https://git/common/config-repo.git
+          repos:
+            team-a:
+                pattern: team-a-*
+                cloneOnStart: true
+                uri: https://git/team-a/config-repo.git
+            team-b:
+                pattern: team-b-*
+                cloneOnStart: false
+                uri: https://git/team-b/config-repo.git
+            team-c:
+                pattern: team-c-*
+                uri: https://git/team-a/config-repo.git
+
+----
+
+In the preceding example, the server clones team-a's config-repo on startup, before it
+accepts any requests.
+All other repositories are not cloned until configuration from the repository is requested.
+
+NOTE: Setting a repository to be cloned when the Config Server starts up can help to identify a misconfigured configuration source (such as an invalid repository URI) quickly, while the Config Server is starting up.
+With `cloneOnStart` not enabled for a configuration source, the Config Server may start successfully with a misconfigured or invalid configuration source and not detect an error until an application requests configuration from that configuration source.
+
+===== Authentication
+
+To use HTTP basic authentication on the remote repository, add the `username` and `password` properties separately (not in the URL), as shown in the following example:
+
+[source,yaml]
+----
+spring:
+  cloud:
+    config:
+      server:
+        git:
+          uri: https://github.com/spring-cloud-samples/config-repo
+          username: trolley
+          password: strongpassword
+----
+
+If you do not use HTTPS and user credentials, SSH should also work out of the box when you store keys in the default directories (`~/.ssh`) and the URI points to an SSH location, such as `git@github.com:configuration/cloud-configuration`.
+It is important that an entry for the Git server be present in the `~/.ssh/known_hosts` file and that it is in `ssh-rsa` format.
+Other formats (such as `ecdsa-sha2-nistp256`) are not supported.
+To avoid surprises, you should ensure that only one entry is present in the `known_hosts` file for the Git server and that it matches the URL you provided to the config server.
+If you use a hostname in the URL, you want to have exactly that (not the IP) in the `known_hosts` file.
+The repository is accessed by using JGit, so any documentation you find on that should be applicable.
+HTTPS proxy settings can be set in `~/.git/config` or (in the same way as for any other JVM process) with
+system properties (`-Dhttps.proxyHost` and `-Dhttps.proxyPort`).
+
+TIP: If you do not know where your `~/.git` directory is, use `git config --global` to manipulate the settings (for example, `git config --global http.sslVerify false`).
+
+JGit requires RSA keys in PEM format. Below is an example ssh-keygen (from openssh) command that will generate a key in the corect format:
+
+```bash
+ssh-keygen -m PEM -t rsa -b 4096 -f ~/config_server_deploy_key.rsa
+```
+
+Warning: When working with SSH keys, the expected ssh private-key must begin with ```-----BEGIN RSA PRIVATE KEY-----```. If the key starts with ```-----BEGIN OPENSSH PRIVATE KEY-----``` then the RSA key will not load when spring-cloud-config server is started. The error looks like:
+```
+- Error in object 'spring.cloud.config.server.git': codes [PrivateKeyIsValid.spring.cloud.config.server.git,PrivateKeyIsValid]; arguments [org.springframework.context.support.DefaultMessageSourceResolvable: codes [spring.cloud.config.server.git.,]; arguments []; default message []]; default message [Property 'spring.cloud.config.server.git.privateKey' is not a valid private key]
+```
+
+To correct the above error the RSA key must be converted to PEM format. An example using openssh is provided above for generating a new key in the appropriate format.
+
+===== Authentication with AWS CodeCommit
+
+Spring Cloud Config Server also supports https://docs.aws.amazon.com/codecommit/latest/userguide/welcome.html[AWS CodeCommit] authentication.
+AWS CodeCommit uses an authentication helper when using Git from the command line.
+This helper is not used with the JGit library, so a JGit CredentialProvider for AWS CodeCommit is created if the Git URI matches the AWS CodeCommit pattern.
+AWS CodeCommit URIs follow this pattern:
+
+```bash
+https//git-codecommit.${AWS_REGION}.amazonaws.com/v1/repos/${repo}.
+```
+
+If you provide a username and password with an AWS CodeCommit URI, they must be the https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSGettingStartedGuide/AWSCredentials.html[AWS accessKeyId and secretAccessKey] that provide access to the repository.
+If you do not specify a username and password, the accessKeyId and secretAccessKey are retrieved by using the https://docs.aws.amazon.com/sdk-for-java/v1/developer-guide/credentials.html[AWS Default Credential Provider Chain].
+
+If your Git URI matches the CodeCommit URI pattern (shown earlier), you must provide valid AWS credentials in the username and password or in one of the locations supported by the default credential provider chain.
+AWS EC2 instances may use https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/iam-roles-for-amazon-ec2.html[IAM Roles for EC2 Instances].
+
+NOTE: The `aws-java-sdk-core` jar is an optional dependency.
+If the `aws-java-sdk-core` jar is not on your classpath, the AWS Code Commit credential provider is not created, regardless of the git server URI.
+
+===== Authentication with Google Cloud Source
+
+Spring Cloud Config Server also supports authenticating against https://cloud.google.com/source-repositories/[Google Cloud Source] repositories.
+
+If your Git URI uses the `http` or `https` protocol and the domain name is `source.developers.google.com`, the Google Cloud Source credentials provider will be used. A Google Cloud Source repository URI has the format `https://source.developers.google.com/p/${GCP_PROJECT}/r/${REPO}`. To obtain the URI for your repository, click on "Clone" in the Google Cloud Source UI, and select "Manually generated credentials". Do not generate any credentials, simply copy the displayed URI.
+
+The Google Cloud Source credentials provider will use Google Cloud Platform application default credentials. See https://cloud.google.com/sdk/gcloud/reference/auth/application-default/login[Google Cloud SDK documentation] on how to create application default credentials for a system. This approach will work for user accounts in dev environments and for service accounts in production environments.
+
+NOTE: `com.google.auth:google-auth-library-oauth2-http` is an optional dependency.
+If the `google-auth-library-oauth2-http` jar is not on your classpath, the Google Cloud Source credential provider is not created, regardless of the git server URI.
+
+===== Git SSH configuration using properties
+
+By default, the JGit library used by Spring Cloud Config Server uses SSH configuration files such as `~/.ssh/known_hosts` and `/etc/ssh/ssh_config` when connecting to Git repositories by using an SSH URI.
+In cloud environments such as Cloud Foundry, the local filesystem may be ephemeral or not easily accessible.
+For those cases, SSH configuration can be set by using Java properties.
+In order to activate property-based SSH configuration, the `spring.cloud.config.server.git.ignoreLocalSshSettings` property must be set to `true`, as shown in the following example:
+
+[source,yaml]
+----
+  spring:
+    cloud:
+      config:
+        server:
+          git:
+            uri: git@gitserver.com:team/repo1.git
+            ignoreLocalSshSettings: true
+            hostKey: someHostKey
+            hostKeyAlgorithm: ssh-rsa
+            privateKey: |
+                         -----BEGIN RSA PRIVATE KEY-----
+                         MIIEpgIBAAKCAQEAx4UbaDzY5xjW6hc9jwN0mX33XpTDVW9WqHp5AKaRbtAC3DqX
+                         IXFMPgw3K45jxRb93f8tv9vL3rD9CUG1Gv4FM+o7ds7FRES5RTjv2RT/JVNJCoqF
+                         ol8+ngLqRZCyBtQN7zYByWMRirPGoDUqdPYrj2yq+ObBBNhg5N+hOwKjjpzdj2Ud
+                         1l7R+wxIqmJo1IYyy16xS8WsjyQuyC0lL456qkd5BDZ0Ag8j2X9H9D5220Ln7s9i
+                         oezTipXipS7p7Jekf3Ywx6abJwOmB0rX79dV4qiNcGgzATnG1PkXxqt76VhcGa0W
+                         DDVHEEYGbSQ6hIGSh0I7BQun0aLRZojfE3gqHQIDAQABAoIBAQCZmGrk8BK6tXCd
+                         fY6yTiKxFzwb38IQP0ojIUWNrq0+9Xt+NsypviLHkXfXXCKKU4zUHeIGVRq5MN9b
+                         BO56/RrcQHHOoJdUWuOV2qMqJvPUtC0CpGkD+valhfD75MxoXU7s3FK7yjxy3rsG
+                         EmfA6tHV8/4a5umo5TqSd2YTm5B19AhRqiuUVI1wTB41DjULUGiMYrnYrhzQlVvj
+                         5MjnKTlYu3V8PoYDfv1GmxPPh6vlpafXEeEYN8VB97e5x3DGHjZ5UrurAmTLTdO8
+                         +AahyoKsIY612TkkQthJlt7FJAwnCGMgY6podzzvzICLFmmTXYiZ/28I4BX/mOSe
+                         pZVnfRixAoGBAO6Uiwt40/PKs53mCEWngslSCsh9oGAaLTf/XdvMns5VmuyyAyKG
+                         ti8Ol5wqBMi4GIUzjbgUvSUt+IowIrG3f5tN85wpjQ1UGVcpTnl5Qo9xaS1PFScQ
+                         xrtWZ9eNj2TsIAMp/svJsyGG3OibxfnuAIpSXNQiJPwRlW3irzpGgVx/AoGBANYW
+                         dnhshUcEHMJi3aXwR12OTDnaLoanVGLwLnkqLSYUZA7ZegpKq90UAuBdcEfgdpyi
+                         PhKpeaeIiAaNnFo8m9aoTKr+7I6/uMTlwrVnfrsVTZv3orxjwQV20YIBCVRKD1uX
+                         VhE0ozPZxwwKSPAFocpyWpGHGreGF1AIYBE9UBtjAoGBAI8bfPgJpyFyMiGBjO6z
+                         FwlJc/xlFqDusrcHL7abW5qq0L4v3R+FrJw3ZYufzLTVcKfdj6GelwJJO+8wBm+R
+                         gTKYJItEhT48duLIfTDyIpHGVm9+I1MGhh5zKuCqIhxIYr9jHloBB7kRm0rPvYY4
+                         VAykcNgyDvtAVODP+4m6JvhjAoGBALbtTqErKN47V0+JJpapLnF0KxGrqeGIjIRV
+                         cYA6V4WYGr7NeIfesecfOC356PyhgPfpcVyEztwlvwTKb3RzIT1TZN8fH4YBr6Ee
+                         KTbTjefRFhVUjQqnucAvfGi29f+9oE3Ei9f7wA+H35ocF6JvTYUsHNMIO/3gZ38N
+                         CPjyCMa9AoGBAMhsITNe3QcbsXAbdUR00dDsIFVROzyFJ2m40i4KCRM35bC/BIBs
+                         q0TY3we+ERB40U8Z2BvU61QuwaunJ2+uGadHo58VSVdggqAo0BSkH58innKKt96J
+                         69pcVH/4rmLbXdcmNYGm6iu+MlPQk4BUZknHSmVHIFdJ0EPupVaQ8RHT
+                         -----END RSA PRIVATE KEY-----
+
+----
+
+The following table describes the SSH configuration properties.
+
+.SSH Configuration Properties
+|===
+|Property Name |Remarks
+
+|*ignoreLocalSshSettings*
+|If `true`, use property-based instead of file-based SSH config. Must be set at as `spring.cloud.config.server.git.ignoreLocalSshSettings`, *not* inside a repository definition.
+
+|*privateKey*
+|Valid SSH private key. Must be set if `ignoreLocalSshSettings` is true and Git URI is SSH format.
+
+|*hostKey*
+|Valid SSH host key. Must be set if `hostKeyAlgorithm` is also set.
+
+|*hostKeyAlgorithm*
+|One of `ssh-dss, ssh-rsa, ecdsa-sha2-nistp256, ecdsa-sha2-nistp384, or ecdsa-sha2-nistp521`. Must be set if `hostKey` is also set.
+
+|*strictHostKeyChecking*
+|`true` or `false`. If false, ignore errors with host key.
+
+|*knownHostsFile*
+|Location of custom `.known_hosts` file.
+
+|*preferredAuthentications*
+|Override server authentication method order. This should allow for evading login prompts if server has keyboard-interactive authentication before the `publickey` method.
+|===
+
+===== Placeholders in Git Search Paths
+
+Spring Cloud Config Server also supports a search path with placeholders for the `{application}` and `{profile}` (and `{label}` if
+you need it), as shown in the following example:
+
+[source,yaml]
+----
+spring:
+  cloud:
+    config:
+      server:
+        git:
+          uri: https://github.com/spring-cloud-samples/config-repo
+          search-paths: '{application}'
+----
+
+The preceding listing causes a search of the repository for files in the same name as the directory (as well as the top level).
+Wildcards are also valid in a search path with placeholders (any matching directory is included in the search).
+
+===== Force pull in Git Repositories
+
+As mentioned earlier, Spring Cloud Config Server makes a clone of the remote git repository in case the local copy gets dirty (for example,
+folder content changes by an OS process) such that Spring Cloud Config Server cannot update the local copy from remote repository.
+
+To solve this issue, there is a `force-pull` property that makes Spring Cloud Config Server force pull from the remote repository if the local copy is dirty, as shown in the following example:
+
+[source,yaml]
+----
+spring:
+  cloud:
+    config:
+      server:
+        git:
+          uri: https://github.com/spring-cloud-samples/config-repo
+          force-pull: true
+
+----
+
+If you have a multiple-repositories configuration, you can configure the `force-pull` property per repository, as shown in the following example:
+
+[source,yaml]
+----
+spring:
+  cloud:
+    config:
+      server:
+        git:
+          uri: https://git/common/config-repo.git
+          force-pull: true
+          repos:
+            team-a:
+                pattern: team-a-*
+                uri: https://git/team-a/config-repo.git
+                force-pull: true
+            team-b:
+                pattern: team-b-*
+                uri: https://git/team-b/config-repo.git
+                force-pull: true
+            team-c:
+                pattern: team-c-*
+                uri: https://git/team-a/config-repo.git
+----
+
+NOTE: The default value for `force-pull` property is `false`.
+
+===== Deleting untracked branches in Git Repositories
+
+As Spring Cloud Config Server has a clone of the remote git repository
+after check-outing branch to local repo (e.g fetching properties by label) it will keep this branch
+forever or till the next server restart (which creates new local repo).
+So there could be a case when remote branch is deleted but local copy of it is still available for fetching.
+And if Spring Cloud Config Server client service starts with `--spring.cloud.config.label=deletedRemoteBranch,master`
+it will fetch properties from `deletedRemoteBranch` local branch, but not from `master`.
+
+In order to keep local repository branches clean and up to remote - `deleteUntrackedBranches` property could be set.
+It will make Spring Cloud Config Server *force* delete untracked branches from local repository.
+Example:
+
+[source,yaml]
+----
+spring:
+  cloud:
+    config:
+      server:
+        git:
+          uri: https://github.com/spring-cloud-samples/config-repo
+          deleteUntrackedBranches: true
+
+----
+
+NOTE: The default value for `deleteUntrackedBranches` property is `false`.
+
+===== Git Refresh Rate
+
+You can control how often the config server will fetch updated configuration data
+from your Git backend by using `spring.cloud.config.server.git.refreshRate`.  The
+value of this property is specified in seconds.  By default the value is 0, meaning
+the config server will fetch updated configuration from the Git repo every time it
+is requested.
+
+===== Default Label
+
+The default label used for Git is `main`.  If you do not set `spring.cloud.config.server.git.defaultLabel` and a branch named `main`
+does not exist, the config server will by default also try to checkout a branch named `master`.  If
+you would like to disable to the fallback branch behavior you can set
+`spring.cloud.config.server.git.tryMasterBranch` to `false`.
+
+==== Version Control Backend Filesystem Use
+==== File System Backend
+==== Vault Backend
+===== Multiple Properties Sources
+==== Accessing Backends Through a Proxy
+==== Sharing Configuration With All Applications
+===== File Based Repositories
+===== Vault Server
+===== CredHub Server
+==== AWS Secrets Manager
+===== AWS Parameter Store
+==== JDBC Backend
+==== Redis Backend
+==== AWS S3 Backend
+==== AWS Parameter Store Backend
+==== AWS Secrets Manager Backend
+==== CredHub Backend
+===== OAuth 2.0
+==== Composite Environment Repositories
+===== Custom Composite Environment Repositories
+==== Property Overrides
+=== Health Indicator
+=== Security
+=== Actuator and Security
+=== Encryption and Decryption
+=== Key Management
+=== Creating a Key Store for Testing
+=== Using Multiple Keys and Key Rotation
+=== Serving Encrypted Properties
